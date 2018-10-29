@@ -421,6 +421,7 @@ static int rkmpp_retrieve_frame(AVCodecContext *avctx, AVFrame *frame)
 
             desc->nb_objects = 1;
             desc->objects[0].fd = mpp_buffer_get_fd(buffer);
+            desc->objects[0].ptr = mpp_buffer_get_ptr(buffer);
             desc->objects[0].size = mpp_buffer_get_size(buffer);
 
             desc->nb_layers = 1;
