@@ -474,6 +474,8 @@ static int rkmpp_retrieve_frame(AVCodecContext *avctx, AVFrame *frame)
         return AVERROR_EOF;
     } else if (ret == MPP_ERR_TIMEOUT) {
         av_log(avctx, AV_LOG_DEBUG, "Timeout when trying to get a frame from MPP\n");
+    } else {
+        av_log(avctx, AV_LOG_DEBUG, "MPP decode_get_frame ret = %d\n", ret);
     }
 
     return AVERROR(EAGAIN);
@@ -545,6 +547,7 @@ static void rkmpp_flush(AVCodecContext *avctx)
     ret = decoder->mpi->reset(decoder->ctx);
     if (ret == MPP_OK) {
         decoder->first_packet = 1;
+        decoder->eos_reached = 0;
     } else
         av_log(avctx, AV_LOG_ERROR, "Failed to reset MPI (code = %d)\n", ret);
 }
