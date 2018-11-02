@@ -46,6 +46,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
     pkt->buf                  = NULL;
     pkt->side_data            = NULL;
     pkt->side_data_elems      = 0;
+    pkt->hw_frame             = NULL;
 }
 
 AVPacket *av_packet_alloc(void)
@@ -599,6 +600,7 @@ void av_packet_unref(AVPacket *pkt)
 {
     av_packet_free_side_data(pkt);
     av_buffer_unref(&pkt->buf);
+    av_frame_free(&pkt->hw_frame);
     av_init_packet(pkt);
     pkt->data = NULL;
     pkt->size = 0;
@@ -625,6 +627,20 @@ int av_packet_ref(AVPacket *dst, const AVPacket *src)
         if (!dst->buf) {
             ret = AVERROR(ENOMEM);
             goto fail;
+        }
+        if (src->hw_frame) {
+            dst->hw_frame = av_frame_alloc();
+            if (!dst->hw_frame) {
+                av_buffer_unref(&dst->buf);
+                ret = AVERROR(ENOMEM);
+                goto fail;
+            }
+            ret = av_frame_ref(dst->hw_frame, src->hw_frame);
+            if (ret < 0) {
+                av_buffer_unref(&dst->buf);
+                av_frame_free(&dst->hw_frame);
+                goto fail;
+            }
         }
         dst->data = src->data;
     }

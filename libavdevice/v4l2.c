@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2000,2001 Fabrice Bellard
  * Copyright (c) 2006 Luca Abeni
+ * Copyright (c) 2018 Hertz Wang
  *
  * This file is part of FFmpeg.
  *
@@ -39,7 +40,11 @@
 #include <libv4l2.h>
 #endif
 
+#include "libavutil/hwcontext.h"
+#include "libavutil/hwcontext_drm.h"
+
 static const int desired_video_buffers = 256;
+static const int desired_drm_buffers = 4;
 
 #define V4L_ALLFORMATS  3
 #define V4L_RAWFORMATS  1
@@ -79,6 +84,8 @@ struct video_data {
     TimeFilter *timefilter;
     int64_t last_time_m;
 
+    enum v4l2_memory memory_type;
+
     int buffers;
     atomic_int buffers_queued;
     void **buf_start;
@@ -90,6 +97,12 @@ struct video_data {
     int list_format;    /**< Set by a private option. */
     int list_standard;  /**< Set by a private option. */
     char *framerate;    /**< Set by a private option. */
+
+    enum AVPixelFormat av_format;
+    AVBufferRef *hw_frames_ref;
+    AVFrame **pixel_frames;
+    int (*stream_init)(AVFormatContext *ctx);
+    void (*stream_close)(struct video_data *s);
 
     int use_libv4l2;
     int (*open_f)(const char *file, int oflag, ...);
@@ -105,6 +118,9 @@ struct buff_data {
     struct video_data *s;
     int index;
 };
+
+static int mmap_init(AVFormatContext *ctx);
+static void mmap_close(struct video_data *s);
 
 static int device_open(AVFormatContext *ctx, const char* device_path)
 {
@@ -134,6 +150,11 @@ static int device_open(AVFormatContext *ctx, const char* device_path)
     } else {
         SET_WRAPPERS();
     }
+
+    // default MMAP
+    s->memory_type = V4L2_MEMORY_MMAP;
+    s->stream_init = mmap_init;
+    s->stream_close = mmap_close;
 
 #define v4l2_open   s->open_f
 #define v4l2_close  s->close_f
@@ -396,6 +417,111 @@ static int mmap_init(AVFormatContext *ctx)
     return 0;
 }
 
+static void free_pixel_frames(struct video_data *s) {
+    int i;
+
+    for (i = 0; i < s->buffers; i++) {
+        if (s->pixel_frames[i])
+            av_frame_free(&s->pixel_frames[i]);
+    }
+    av_freep(&s->pixel_frames);
+}
+
+static int drm_init(AVFormatContext *ctx)
+{
+    int i, res;
+    struct video_data *s = ctx->priv_data;
+    AVHWFramesContext *hwframes = (AVHWFramesContext*)s->hw_frames_ref->data;
+
+    struct v4l2_requestbuffers req = {
+        .type   = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+        .count  = desired_drm_buffers,
+        .memory = V4L2_MEMORY_DMABUF
+    };
+
+    if (v4l2_ioctl(s->fd, VIDIOC_REQBUFS, &req) < 0) {
+        res = AVERROR(errno);
+        av_log(ctx, AV_LOG_ERROR, "ioctl(VIDIOC_REQBUFS): %s\n", av_err2str(res));
+        return res;
+    }
+
+    s->memory_type = V4L2_MEMORY_DMABUF;
+
+    hwframes->format    = AV_PIX_FMT_DRM_PRIME;
+    if (s->av_format != AV_PIX_FMT_NONE)
+        hwframes->sw_format = s->av_format;
+    else
+        hwframes->sw_format = AV_PIX_FMT_BGR0; // jpeg or h264
+    hwframes->width     = s->width;
+    hwframes->height    = s->height;
+    hwframes->initial_pool_size = req.count;
+    res = av_hwframe_ctx_init(s->hw_frames_ref);
+    if (res < 0)
+        return res;
+
+    if (hwframes->initial_pool_size < 2) {
+        av_log(ctx, AV_LOG_ERROR, "Insufficient buffer memory\n");
+        return AVERROR(ENOMEM);
+    }
+
+    s->buffers = hwframes->initial_pool_size;
+    s->pixel_frames = av_mallocz_array(s->buffers, sizeof(AVFrame *));
+    if (!s->pixel_frames) {
+        av_log(ctx, AV_LOG_ERROR, "Cannot allocate pixel frame pointers\n");
+        return AVERROR(ENOMEM);
+    }
+    s->buf_start = av_malloc_array(s->buffers, sizeof(void *));
+    if (!s->buf_start) {
+        av_log(ctx, AV_LOG_ERROR, "Cannot allocate buffer pointers\n");
+        res = AVERROR(ENOMEM);
+        goto fail;
+    }
+    s->buf_len = av_malloc_array(s->buffers, sizeof(unsigned int));
+    if (!s->buf_len) {
+        av_log(ctx, AV_LOG_ERROR, "Cannot allocate buffer sizes\n");
+        res = AVERROR(ENOMEM);
+        goto fail;
+    }
+
+    for (i = 0; i < s->buffers; i++) {
+        AVDRMFrameDescriptor *desc;
+        AVDRMObjectDescriptor *object;
+
+        s->pixel_frames[i] = av_frame_alloc();
+        if (!s->pixel_frames[i]) {
+            res = AVERROR(ENOMEM);
+            goto fail;
+        }
+        res = av_hwframe_get_buffer(s->hw_frames_ref, s->pixel_frames[i], 0);
+        if (res < 0)
+            goto fail;
+
+        desc = (AVDRMFrameDescriptor*)s->pixel_frames[i]->data[0];
+        object = &desc->objects[0];
+        // pool always provide only one object, and mmapped userspace viraddr
+        av_assert0(desc->nb_objects == 1 && desc->objects[0].ptr);
+
+        s->buf_start[i] = object->ptr;
+        s->buf_len[i] = object->size;
+        if (s->frame_size > 0 && s->buf_len[i] < s->frame_size) {
+            av_log(ctx, AV_LOG_ERROR,
+                   "buf_len[%d] = %d < expected frame size %d\n",
+                   i, s->buf_len[i], s->frame_size);
+            return AVERROR(ENOMEM);
+        }
+    }
+
+    return 0;
+
+fail:
+    free_pixel_frames(s);
+    if (s->buf_start)
+        av_freep(&s->buf_start);
+    if (s->buf_len)
+        av_freep(&s->buf_len);
+    return res;
+}
+
 static int enqueue_buffer(struct video_data *s, struct v4l2_buffer *buf)
 {
     int res = 0;
@@ -410,16 +536,22 @@ static int enqueue_buffer(struct video_data *s, struct v4l2_buffer *buf)
     return res;
 }
 
-static void mmap_release_buffer(void *opaque, uint8_t *data)
+static void stream_release_buffer(void *opaque, uint8_t *data)
 {
     struct v4l2_buffer buf = { 0 };
     struct buff_data *buf_descriptor = opaque;
     struct video_data *s = buf_descriptor->s;
 
     buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    buf.memory = V4L2_MEMORY_MMAP;
+    buf.memory = s->memory_type;
     buf.index = buf_descriptor->index;
     av_free(buf_descriptor);
+    if (s->hw_frames_ref) {
+        // V4L2_MEMORY_DMABUF
+        AVFrame *frame = s->pixel_frames[buf.index];
+        buf.m.fd = ((AVDRMFrameDescriptor*)frame->data[0])->objects[0].fd;
+        buf.length = s->buf_len[buf.index];
+    }
 
     enqueue_buffer(s, &buf);
 }
@@ -485,12 +617,12 @@ static int convert_timestamp(AVFormatContext *ctx, int64_t *ts)
     return 0;
 }
 
-static int mmap_read_frame(AVFormatContext *ctx, AVPacket *pkt)
+static int stream_read_frame(AVFormatContext *ctx, AVPacket *pkt)
 {
     struct video_data *s = ctx->priv_data;
     struct v4l2_buffer buf = {
         .type   = V4L2_BUF_TYPE_VIDEO_CAPTURE,
-        .memory = V4L2_MEMORY_MMAP
+        .memory = s->memory_type
     };
     struct timeval buf_ts;
     int res;
@@ -543,7 +675,8 @@ static int mmap_read_frame(AVFormatContext *ctx, AVPacket *pkt)
     }
 
     /* Image is at s->buff_start[buf.index] */
-    if (atomic_load(&s->buffers_queued) == FFMAX(s->buffers / 8, 1)) {
+    if (s->memory_type == V4L2_MEMORY_MMAP &&
+        atomic_load(&s->buffers_queued) == FFMAX(s->buffers / 8, 1)) {
         /* when we start getting low on queued buffers, fall back on copying data */
         res = av_new_packet(pkt, buf.bytesused);
         if (res < 0) {
@@ -577,11 +710,27 @@ static int mmap_read_frame(AVFormatContext *ctx, AVPacket *pkt)
         buf_descriptor->index = buf.index;
         buf_descriptor->s     = s;
 
-        pkt->buf = av_buffer_create(pkt->data, pkt->size, mmap_release_buffer,
+        if (s->hw_frames_ref) {
+            if (pkt->hw_frame) {
+                av_log(ctx, AV_LOG_WARNING, "Input packet is not a empty packet!\n");
+                av_frame_free(&pkt->hw_frame);
+            }
+            pkt->hw_frame = av_frame_alloc();
+            if (!pkt->hw_frame ||
+                av_frame_ref(pkt->hw_frame, s->pixel_frames[buf.index])) {
+                enqueue_buffer(s, &buf);
+                av_frame_free(&pkt->hw_frame);
+                av_freep(&buf_descriptor);
+                return AVERROR(ENOMEM);
+            }
+        }
+
+        pkt->buf = av_buffer_create(pkt->data, pkt->size, stream_release_buffer,
                                     buf_descriptor, 0);
         if (!pkt->buf) {
             av_log(ctx, AV_LOG_ERROR, "Failed to create a buffer\n");
             enqueue_buffer(s, &buf);
+            av_frame_free(&pkt->hw_frame);
             av_freep(&buf_descriptor);
             return AVERROR(ENOMEM);
         }
@@ -592,7 +741,7 @@ static int mmap_read_frame(AVFormatContext *ctx, AVPacket *pkt)
     return pkt->size;
 }
 
-static int mmap_start(AVFormatContext *ctx)
+static int stream_start(AVFormatContext *ctx)
 {
     struct video_data *s = ctx->priv_data;
     enum v4l2_buf_type type;
@@ -602,8 +751,15 @@ static int mmap_start(AVFormatContext *ctx)
         struct v4l2_buffer buf = {
             .type   = V4L2_BUF_TYPE_VIDEO_CAPTURE,
             .index  = i,
-            .memory = V4L2_MEMORY_MMAP
+            .memory = s->memory_type
         };
+
+        if (s->hw_frames_ref) {
+            // V4L2_MEMORY_DMABUF
+            AVFrame *frame = s->pixel_frames[i];
+            buf.m.fd = ((AVDRMFrameDescriptor*)frame->data[0])->objects[0].fd;
+            buf.length = s->buf_len[i];
+        }
 
         if (v4l2_ioctl(s->fd, VIDIOC_QBUF, &buf) < 0) {
             res = AVERROR(errno);
@@ -638,6 +794,19 @@ static void mmap_close(struct video_data *s)
     for (i = 0; i < s->buffers; i++) {
         v4l2_munmap(s->buf_start[i], s->buf_len[i]);
     }
+    av_freep(&s->buf_start);
+    av_freep(&s->buf_len);
+}
+
+static void drm_close(struct video_data *s)
+{
+    enum v4l2_buf_type type;
+
+    type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    if (-1 == v4l2_ioctl(s->fd, VIDIOC_STREAMOFF, &type))
+        av_log(NULL, AV_LOG_FATAL, "V4L2 Could not steam off (errno = %d).\n",
+               errno);
+    free_pixel_frames(s);
     av_freep(&s->buf_start);
     av_freep(&s->buf_len);
 }
@@ -887,8 +1056,37 @@ static int v4l2_read_header(AVFormatContext *ctx)
     avpriv_set_pts_info(st, 64, 1, 1000000); /* 64 bits pts in us */
 
     if (s->pixel_format) {
-        const AVCodecDescriptor *desc = avcodec_descriptor_get_by_name(s->pixel_format);
+        const AVCodecDescriptor *desc;
+        const char *ff_pix_fmt = NULL;
 
+        // drm_prime:ff_pix_fmt
+        if (av_strstart(s->pixel_format, "drm_prime:", &ff_pix_fmt)) {
+            // if set drm_prime, alloc drm buffer externally and queue to v4l2
+            AVBufferRef *hw_device_ref;
+            // libv4l2 has implicit format conversion,
+            // conflict to our intention of using drm external buffer
+            if (s->use_libv4l2) {
+                av_log(ctx, AV_LOG_WARNING,
+                    "use_libv4l2 conflict to pixel format drm_prime\n");
+                res = AVERROR_EXIT;
+                goto fail;
+            }
+            res = av_hwdevice_ctx_create(&hw_device_ref, AV_HWDEVICE_TYPE_DRM,
+                                         NULL, NULL, 0);
+            if (res < 0)
+                goto fail;
+            s->hw_frames_ref = av_hwframe_ctx_alloc(hw_device_ref);
+            av_buffer_unref(&hw_device_ref);
+            if (!s->hw_frames_ref) {
+                res = AVERROR(ENOMEM);
+                goto fail;
+            }
+            memmove(s->pixel_format, ff_pix_fmt, strlen(ff_pix_fmt) + 1);
+            s->stream_init = drm_init;
+            s->stream_close = drm_close;
+        }
+
+        desc = avcodec_descriptor_get_by_name(s->pixel_format);
         if (desc)
             ctx->video_codec_id = desc->id;
 
@@ -940,29 +1138,39 @@ static int v4l2_read_header(AVFormatContext *ctx)
     if ((res = v4l2_set_parameters(ctx)) < 0)
         goto fail;
 
+    s->av_format         =
     st->codecpar->format = ff_fmt_v4l2ff(desired_format, codec_id);
     if (st->codecpar->format != AV_PIX_FMT_NONE)
         s->frame_size = av_image_get_buffer_size(st->codecpar->format,
                                                  s->width, s->height, 1);
 
-    if ((res = mmap_init(ctx)) ||
-        (res = mmap_start(ctx)) < 0)
+    if ((res = s->stream_init(ctx)) ||
+        (res = stream_start(ctx)) < 0)
             goto fail;
 
     s->top_field_first = first_field(s);
 
     st->codecpar->codec_type = AVMEDIA_TYPE_VIDEO;
     st->codecpar->codec_id = codec_id;
-    if (codec_id == AV_CODEC_ID_RAWVIDEO)
+    if (codec_id == AV_CODEC_ID_RAWVIDEO) {
         st->codecpar->codec_tag =
             avcodec_pix_fmt_to_codec_tag(st->codecpar->format);
-    else if (codec_id == AV_CODEC_ID_H264) {
+    } else if (codec_id == AV_CODEC_ID_H264) {
         st->need_parsing = AVSTREAM_PARSE_FULL_ONCE;
     }
     if (desired_format == V4L2_PIX_FMT_YVU420)
         st->codecpar->codec_tag = MKTAG('Y', 'V', '1', '2');
     else if (desired_format == V4L2_PIX_FMT_YVU410)
         st->codecpar->codec_tag = MKTAG('Y', 'V', 'U', '9');
+
+    if (s->hw_frames_ref) {
+        // tag: ignore
+        st->codecpar->codec_tag = MKTAG('I', 'G', 'N', 'R');
+        st->codecpar->sw_format =
+        st->internal->avctx->sw_pix_fmt = st->codecpar->format;
+        st->codecpar->format = AV_PIX_FMT_DRM_PRIME;
+    }
+
     st->codecpar->width = s->width;
     st->codecpar->height = s->height;
     if (st->avg_frame_rate.den)
@@ -971,6 +1179,8 @@ static int v4l2_read_header(AVFormatContext *ctx)
     return 0;
 
 fail:
+    if (s->hw_frames_ref)
+        av_buffer_unref(&s->hw_frames_ref);
     v4l2_close(s->fd);
     return res;
 }
@@ -985,9 +1195,8 @@ FF_ENABLE_DEPRECATION_WARNINGS
 #endif
     int res;
 
-    if ((res = mmap_read_frame(ctx, pkt)) < 0) {
+    if ((res = stream_read_frame(ctx, pkt)) < 0)
         return res;
-    }
 
 #if FF_API_CODED_FRAME && FF_API_LAVF_AVCTX
 FF_DISABLE_DEPRECATION_WARNINGS
@@ -1009,7 +1218,10 @@ static int v4l2_read_close(AVFormatContext *ctx)
         av_log(ctx, AV_LOG_WARNING, "Some buffers are still owned by the caller on "
                "close.\n");
 
-    mmap_close(s);
+    s->stream_close(s);
+
+    if (s->hw_frames_ref)
+        av_buffer_unref(&s->hw_frames_ref);
 
     v4l2_close(s->fd);
     return 0;

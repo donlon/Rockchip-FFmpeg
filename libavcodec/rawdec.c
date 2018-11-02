@@ -73,37 +73,39 @@ static av_cold int raw_init_decoder(AVCodecContext *avctx)
 
     ff_bswapdsp_init(&context->bbdsp);
 
-    if (   avctx->codec_tag == MKTAG('r','a','w',' ')
-        || avctx->codec_tag == MKTAG('N','O','1','6'))
-        avctx->pix_fmt = avpriv_find_pix_fmt(avpriv_pix_fmt_bps_mov,
-                                      avctx->bits_per_coded_sample);
-    else if (avctx->codec_tag == MKTAG('W', 'R', 'A', 'W'))
-        avctx->pix_fmt = avpriv_find_pix_fmt(avpriv_pix_fmt_bps_avi,
-                                      avctx->bits_per_coded_sample);
-    else if (avctx->codec_tag && (avctx->codec_tag & 0xFFFFFF) != MKTAG('B','I','T', 0))
-        avctx->pix_fmt = avpriv_find_pix_fmt(ff_raw_pix_fmt_tags, avctx->codec_tag);
-    else if (avctx->pix_fmt == AV_PIX_FMT_NONE && avctx->bits_per_coded_sample)
-        avctx->pix_fmt = avpriv_find_pix_fmt(avpriv_pix_fmt_bps_avi,
-                                      avctx->bits_per_coded_sample);
+    if (!(avctx->codec_tag == MKTAG('I', 'G', 'N', 'R'))) {
+        if (   avctx->codec_tag == MKTAG('r','a','w',' ')
+            || avctx->codec_tag == MKTAG('N','O','1','6'))
+            avctx->pix_fmt = avpriv_find_pix_fmt(avpriv_pix_fmt_bps_mov,
+                                        avctx->bits_per_coded_sample);
+        else if (avctx->codec_tag == MKTAG('W', 'R', 'A', 'W'))
+            avctx->pix_fmt = avpriv_find_pix_fmt(avpriv_pix_fmt_bps_avi,
+                                        avctx->bits_per_coded_sample);
+        else if (avctx->codec_tag && (avctx->codec_tag & 0xFFFFFF) != MKTAG('B','I','T', 0))
+            avctx->pix_fmt = avpriv_find_pix_fmt(ff_raw_pix_fmt_tags, avctx->codec_tag);
+        else if (avctx->pix_fmt == AV_PIX_FMT_NONE && avctx->bits_per_coded_sample)
+            avctx->pix_fmt = avpriv_find_pix_fmt(avpriv_pix_fmt_bps_avi,
+                                        avctx->bits_per_coded_sample);
 
-    desc = av_pix_fmt_desc_get(avctx->pix_fmt);
-    if (!desc) {
-        av_log(avctx, AV_LOG_ERROR, "Invalid pixel format.\n");
-        return AVERROR(EINVAL);
-    }
+        desc = av_pix_fmt_desc_get(avctx->pix_fmt);
+        if (!desc) {
+            av_log(avctx, AV_LOG_ERROR, "Invalid pixel format.\n");
+            return AVERROR(EINVAL);
+        }
 
-    if (desc->flags & (AV_PIX_FMT_FLAG_PAL | FF_PSEUDOPAL)) {
-        context->palette = av_buffer_alloc(AVPALETTE_SIZE);
-        if (!context->palette)
-            return AVERROR(ENOMEM);
-#if FF_API_PSEUDOPAL
-        if (desc->flags & AV_PIX_FMT_FLAG_PSEUDOPAL)
-            avpriv_set_systematic_pal2((uint32_t*)context->palette->data, avctx->pix_fmt);
-#endif
-        else {
-            memset(context->palette->data, 0, AVPALETTE_SIZE);
-            if (avctx->bits_per_coded_sample == 1)
-                memset(context->palette->data, 0xff, 4);
+        if (desc->flags & (AV_PIX_FMT_FLAG_PAL | FF_PSEUDOPAL)) {
+            context->palette = av_buffer_alloc(AVPALETTE_SIZE);
+            if (!context->palette)
+                return AVERROR(ENOMEM);
+    #if FF_API_PSEUDOPAL
+            if (desc->flags & AV_PIX_FMT_FLAG_PSEUDOPAL)
+                avpriv_set_systematic_pal2((uint32_t*)context->palette->data, avctx->pix_fmt);
+    #endif
+            else {
+                memset(context->palette->data, 0, AVPALETTE_SIZE);
+                if (avctx->bits_per_coded_sample == 1)
+                    memset(context->palette->data, 0xff, 4);
+            }
         }
     }
 
@@ -179,7 +181,7 @@ static int raw_decode(AVCodecContext *avctx, void *data, int *got_frame,
     int res, len;
     int need_copy;
 
-    AVFrame   *frame   = data;
+    AVFrame *frame = avpkt->hw_frame? avpkt->hw_frame : data;
 
     if (avctx->width <= 0) {
         av_log(avctx, AV_LOG_ERROR, "width is not set\n");
@@ -204,33 +206,35 @@ static int raw_decode(AVCodecContext *avctx, void *data, int *got_frame,
         return AVERROR_INVALIDDATA;
     }
 
-    desc = av_pix_fmt_desc_get(avctx->pix_fmt);
+    if (!avpkt->hw_frame) {
+        desc = av_pix_fmt_desc_get(avctx->pix_fmt);
 
-    if ((avctx->bits_per_coded_sample == 8 || avctx->bits_per_coded_sample == 4 ||
-         avctx->bits_per_coded_sample == 2 || avctx->bits_per_coded_sample == 1 ||
-         (avctx->bits_per_coded_sample == 0 && (context->is_nut_pal8 || context->is_mono)) ) &&
-        (context->is_mono || context->is_pal8) &&
-        (!avctx->codec_tag || avctx->codec_tag == MKTAG('r','a','w',' ') ||
-                context->is_nut_mono || context->is_nut_pal8)) {
-        context->is_1_2_4_8_bpp = 1;
-        if (context->is_mono) {
-            int row_bytes = avctx->width / 8 + (avctx->width & 7 ? 1 : 0);
-            context->frame_size = av_image_get_buffer_size(avctx->pix_fmt,
-                                                           FFALIGN(row_bytes, 16) * 8,
-                                                           avctx->height, 1);
-        } else
-            context->frame_size = av_image_get_buffer_size(avctx->pix_fmt,
-                                                           FFALIGN(avctx->width, 16),
-                                                           avctx->height, 1);
-    } else {
-        context->is_lt_16bpp = av_get_bits_per_pixel(desc) == 16 && avctx->bits_per_coded_sample && avctx->bits_per_coded_sample < 16;
-        context->frame_size = av_image_get_buffer_size(avctx->pix_fmt, avctx->width,
-                                                       avctx->height, 1);
+        if ((avctx->bits_per_coded_sample == 8 || avctx->bits_per_coded_sample == 4 ||
+            avctx->bits_per_coded_sample == 2 || avctx->bits_per_coded_sample == 1 ||
+            (avctx->bits_per_coded_sample == 0 && (context->is_nut_pal8 || context->is_mono)) ) &&
+            (context->is_mono || context->is_pal8) &&
+            (!avctx->codec_tag || avctx->codec_tag == MKTAG('r','a','w',' ') ||
+                    context->is_nut_mono || context->is_nut_pal8)) {
+            context->is_1_2_4_8_bpp = 1;
+            if (context->is_mono) {
+                int row_bytes = avctx->width / 8 + (avctx->width & 7 ? 1 : 0);
+                context->frame_size = av_image_get_buffer_size(avctx->pix_fmt,
+                                                            FFALIGN(row_bytes, 16) * 8,
+                                                            avctx->height, 1);
+            } else
+                context->frame_size = av_image_get_buffer_size(avctx->pix_fmt,
+                                                            FFALIGN(avctx->width, 16),
+                                                            avctx->height, 1);
+        } else {
+            context->is_lt_16bpp = av_get_bits_per_pixel(desc) == 16 && avctx->bits_per_coded_sample && avctx->bits_per_coded_sample < 16;
+            context->frame_size = av_image_get_buffer_size(avctx->pix_fmt, avctx->width,
+                                                        avctx->height, 1);
+        }
+        if (context->frame_size < 0)
+            return context->frame_size;
+
+        need_copy = !avpkt->buf || context->is_1_2_4_8_bpp || context->is_yuv2 || context->is_lt_16bpp;
     }
-    if (context->frame_size < 0)
-        return context->frame_size;
-
-    need_copy = !avpkt->buf || context->is_1_2_4_8_bpp || context->is_yuv2 || context->is_lt_16bpp;
 
     frame->pict_type        = AV_PICTURE_TYPE_I;
     frame->key_frame        = 1;
@@ -249,6 +253,24 @@ static int raw_decode(AVCodecContext *avctx, void *data, int *got_frame,
 
     if ((res = av_image_check_size(avctx->width, avctx->height, 0, avctx)) < 0)
         return res;
+
+    if (avpkt->hw_frame) {
+        AVFrame *out_frame = data;
+
+        res = av_frame_ref(out_frame, avpkt->hw_frame);
+        if (res)
+            return res;
+
+        out_frame->buf[1] = av_buffer_ref(avpkt->buf);
+        if (!out_frame->buf[1]) {
+            av_frame_unref(out_frame);
+            return AVERROR(ENOMEM);
+        }
+        if (context->flip)
+            flip(avctx, out_frame);
+        frame = out_frame;
+        goto out;
+    }
 
     if (need_copy)
         frame->buf[0] = av_buffer_alloc(FFMAX(context->frame_size, buf_size));
@@ -474,6 +496,7 @@ static int raw_decode(AVCodecContext *avctx, void *data, int *got_frame,
         }
     }
 
+out:
     if (avctx->field_order > AV_FIELD_PROGRESSIVE) { /* we have interlaced material flagged in container */
         frame->interlaced_frame = 1;
         if (avctx->field_order == AV_FIELD_TT || avctx->field_order == AV_FIELD_TB)

@@ -1204,22 +1204,33 @@ void avcodec_string(char *buf, int buf_size, AVCodecContext *enc, int encode)
                  ", %d reference frame%s",
                  enc->refs, enc->refs > 1 ? "s" : "");
 
-    if (enc->codec_tag)
+    if (enc->codec_tag) {
+        unsigned int tag = enc->codec_tag;
+        if (enc->codec_tag == MKTAG('I', 'G', 'N', 'R') &&
+            enc->sw_pix_fmt != AV_PIX_FMT_NONE)
+            tag = avcodec_pix_fmt_to_codec_tag(enc->sw_pix_fmt);
         snprintf(buf + strlen(buf), buf_size - strlen(buf), " (%s / 0x%04X)",
-                 av_fourcc2str(enc->codec_tag), enc->codec_tag);
+                 av_fourcc2str(tag), tag);
+    }
 
     switch (enc->codec_type) {
     case AVMEDIA_TYPE_VIDEO:
         {
             char detail[256] = "(";
+            enum AVPixelFormat pix_fmt = enc->pix_fmt;
 
             av_strlcat(buf, separator, buf_size);
 
             snprintf(buf + strlen(buf), buf_size - strlen(buf),
-                 "%s", enc->pix_fmt == AV_PIX_FMT_NONE ? "none" :
-                     av_get_pix_fmt_name(enc->pix_fmt));
-            if (enc->bits_per_raw_sample && enc->pix_fmt != AV_PIX_FMT_NONE &&
-                enc->bits_per_raw_sample < av_pix_fmt_desc_get(enc->pix_fmt)->comp[0].depth)
+                 "%s", pix_fmt == AV_PIX_FMT_NONE ? "none" :
+                     av_get_pix_fmt_name(pix_fmt));
+            if (enc->sw_pix_fmt != AV_PIX_FMT_NONE) {
+                pix_fmt = enc->sw_pix_fmt;
+                snprintf(buf + strlen(buf), buf_size - strlen(buf),
+                 "(%s) ", av_get_pix_fmt_name(pix_fmt));
+            }
+            if (enc->bits_per_raw_sample && pix_fmt != AV_PIX_FMT_NONE &&
+                enc->bits_per_raw_sample < av_pix_fmt_desc_get(pix_fmt)->comp[0].depth)
                 av_strlcatf(detail, sizeof(detail), "%d bpc, ", enc->bits_per_raw_sample);
             if (enc->color_range != AVCOL_RANGE_UNSPECIFIED)
                 av_strlcatf(detail, sizeof(detail), "%s, ",
@@ -1978,6 +1989,7 @@ static void codec_parameters_reset(AVCodecParameters *par)
     par->codec_type          = AVMEDIA_TYPE_UNKNOWN;
     par->codec_id            = AV_CODEC_ID_NONE;
     par->format              = -1;
+    par->sw_format           = AV_PIX_FMT_NONE;
     par->field_order         = AV_FIELD_UNKNOWN;
     par->color_range         = AVCOL_RANGE_UNSPECIFIED;
     par->color_primaries     = AVCOL_PRI_UNSPECIFIED;
@@ -2046,6 +2058,7 @@ int avcodec_parameters_from_context(AVCodecParameters *par,
     switch (par->codec_type) {
     case AVMEDIA_TYPE_VIDEO:
         par->format              = codec->pix_fmt;
+        par->sw_format           = codec->sw_pix_fmt;
         par->width               = codec->width;
         par->height              = codec->height;
         par->field_order         = codec->field_order;
@@ -2101,6 +2114,7 @@ int avcodec_parameters_to_context(AVCodecContext *codec,
     switch (par->codec_type) {
     case AVMEDIA_TYPE_VIDEO:
         codec->pix_fmt                = par->format;
+        codec->sw_pix_fmt             = par->sw_format;
         codec->width                  = par->width;
         codec->height                 = par->height;
         codec->field_order            = par->field_order;
@@ -2197,7 +2211,9 @@ int64_t ff_guess_coded_bitrate(AVCodecContext *avctx)
         return 0;
 
     if (!bits_per_coded_sample) {
-        const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(avctx->pix_fmt);
+        enum AVPixelFormat pix_fmt = avctx->sw_pix_fmt == AV_PIX_FMT_NONE ?
+                                     avctx->pix_fmt : avctx->sw_pix_fmt;
+        const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(pix_fmt);
         bits_per_coded_sample = av_get_bits_per_pixel(desc);
     }
     bitrate = (int64_t)bits_per_coded_sample * avctx->width * avctx->height *
