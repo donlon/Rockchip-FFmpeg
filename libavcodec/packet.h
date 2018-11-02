@@ -383,6 +383,15 @@ typedef struct AVPacket {
     attribute_deprecated
     int64_t convergence_duration;
 #endif
+    /*
+     * 1. zero copying path for input device, such as camera grab.
+     *    AVPacket may be actually an AVFrame.
+     * 2. the API of hwaccel always handle AVFrame while contains the hw buffer
+     *    descriptor
+     *
+     * This is a reference to a hwaccel avframe.
+     */
+    AVFrame *hw_frame;
 } AVPacket;
 
 #define AV_PKT_FLAG_KEY     0x0001 ///< The packet contains a keyframe
