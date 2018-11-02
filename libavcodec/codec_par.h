@@ -84,6 +84,12 @@ typedef struct AVCodecParameters {
     int format;
 
     /**
+     * video only: the pixel format, the value corresponds to enum AVPixelFormat,
+     *             except the hw_accel pixel format.
+     */
+    int sw_format;
+
+    /**
      * The average bitrate of the encoded data (in bits per second).
      */
     int64_t bit_rate;
