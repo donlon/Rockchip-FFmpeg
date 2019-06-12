@@ -1,0 +1,299 @@
+menuconfig RV_TARGET_FFMPEG
+	bool "FFMPEG"
+	default n
+	help
+	  FFMPEG in rv is used as muxer/demuxer, audio codecs and hardware h264 codecs.
+
+if RV_TARGET_FFMPEG
+config RV_TARGET_FFMPEG_STATIC_LIB
+	bool "Build static lib"
+	default n
+
+config RV_TARGET_FFMPEG_FS_MANAGE
+	bool "Use fs manage interface"
+	default n
+	help
+	  file interface use libfs_manage
+
+config RV_TARGET_MPP_DECODER_LIMIT_BUFFER_NUM
+	string "the num of mpp decoder limited buffer"
+	default 0
+	help
+	  if 0, mpp decoder suppose that ion buffer can be used without concern.
+	  Set equal or greater than 4 if you need the mpp decoder limit buffer usage.
+
+config RV_TARGET_FFMPEG_GPL
+	bool "Enable GPL code"
+	default n
+	help
+	  allow use of GPL code, the resulting libs and binaries will be under GPL
+
+config RV_TARGET_FFMPEG_NONFREE
+	bool "Enable nonfree code"
+	default n
+	help
+	  allow use of nonfree code, the resulting libs and binaries
+	  will be unredistributable
+
+config RV_TARGET_FFMPEG_DISABLE_FFPLAY
+	bool "Disable ffplay"
+	default n
+
+config RV_TARGET_FFMPEG_DISABLE_FFPORBE
+	bool "Disable ffprobe"
+	default n
+
+config RV_TARGET_FFMPEG_DISABLE_COREIMAGE
+	bool "Disable core image"
+	default n
+
+config RV_TARGET_FFMPEG_DISABLE_VALGRINDBACKTRACE
+	bool "Disable valgrind-backtrace"
+	default n
+
+config RV_TARGET_FFMPEG_DISABLE_LOGGING
+	bool "Disable logging"
+	default n
+
+config RV_TARGET_FFMPEG_DISABLE_BSFS
+	bool "Disable bsfs"
+	default n
+
+config RV_TARGET_FFMPEG_DISABLE_MUXERS
+	bool "Disable all muxers"
+	default n
+
+config RV_TARGET_FFMPEG_DISABLE_DEMUXERS
+	bool "Disable all demuxers"
+	default n
+
+config RV_TARGET_FFMPEG_DISABLE_FILTERS
+	bool "Disable all filters"
+	default n
+
+config RV_TARGET_FFMPEG_DISABLE_ENCODERS
+	bool "Disable all encoders"
+	default n
+
+config RV_TARGET_FFMPEG_DISABLE_DECODERS
+	bool "Disable all decoders"
+	default n
+
+config RV_TARGET_FFMPEG_DEMUXER_H264
+	bool "Enable demuxer h264"
+	default n
+
+config RV_TARGET_FFMPEG_MUXER_AVI
+	bool "Enable muxer avi"
+	default y if RV_TARGET_MAIN_APP_RECORD_FORMAT = "avi"
+
+config RV_TARGET_FFMPEG_DEMUXER_AVI
+	bool "Enable demuxer avi"
+	default y if RV_TARGET_MAIN_APP_RECORD_FORMAT = "avi"
+
+config RV_TARGET_FFMPEG_MUXER_MPEGTS
+	bool "Enable muxer mpegts"
+	default y if RV_TARGET_MAIN_APP_RECORD_FORMAT = "ts"
+
+config RV_TARGET_FFMPEG_DEMUXER_MPEGTS
+	bool "Enable demuxer mpegts"
+	default y if RV_TARGET_MAIN_APP_RECORD_FORMAT = "ts"
+
+config RV_TARGET_FFMPEG_DEMUXER_MPEGPS
+	bool "Enable demuxer mpegps"
+	default n
+
+config RV_TARGET_FFMPEG_MUXER_RTP
+	bool "Enable muxer rtp"
+	default n
+
+config RV_TARGET_FFMPEG_MUXER_MP4
+	bool "Enable muxer mp4"
+	default y if RV_TARGET_MAIN_APP_RECORD_FORMAT = "mp4"
+
+config RV_TARGET_FFMPEG_MUXER_MOV
+	bool "Enable muxer mov"
+	default y if RV_TARGET_MAIN_APP_RECORD_FORMAT = "mov"
+
+config RV_TARGET_FFMPEG_DEMUXER_MOV_MP4
+	bool "Enable demuxer mov/mp4"
+	default y if RV_TARGET_MAIN_APP_RECORD_FORMAT = "mp4" || RV_TARGET_MAIN_APP_RECORD_FORMAT = "mov"
+
+config RV_TARGET_FFMPEG_MUXER_ADTS
+	bool "Enable muxer adts"
+	default n
+
+config RV_TARGET_FFMPEG_DEMUXER_AAC
+	bool "Enable demuxer aac"
+	default n
+
+config RV_TARGET_FFMPEG_MUXER_RTP_MPEGTS
+	bool "Enable muxer rtp_mpegts"
+	default n
+	select RV_TARGET_FFMPEG_MUXER_RTP
+	select RV_TARGET_FFMPEG_MUXER_MPEGTS
+
+config RV_TARGET_FFMPEG_MUXER_FLV
+	bool "Enable muxer flv"
+	default y if RV_TARGET_MAIN_APP_TS_PROTOCOL = "rtmp"
+	default n
+
+config RV_TARGET_FFMPEG_DEMUXER_RTSP
+	bool "Enable demuxer rtsp"
+	default n
+
+config RV_TARGET_FFMPEG_PROTOCOL_FILE
+	bool "Enable protocol file"
+	default y
+
+config RV_TARGET_FFMPEG_PROTOCOL_UDP
+	bool "Enable protocol udp"
+	default n
+
+config RV_TARGET_FFMPEG_PROTOCOL_TCP
+	bool "Enable protocol tcp"
+	default n
+
+config RV_TARGET_FFMPEG_PROTOCOL_RTP
+	bool "Enable protocol rtp"
+	default n
+
+config RV_TARGET_FFMPEG_LIBRTMP
+	bool "Enable protocol librtmp"
+	default y if RV_TARGET_LIBRTMP
+
+
+config RV_TARGET_FFMPEG_ENABLE_SMALL
+	bool "Enable small"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_DECODER_FDKAAC
+	bool "Enable decoder:fdk_aac"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_DECODER_AAC
+	bool "Enable decoder:aac"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_DECODER_AACAT
+	bool "Enable decoder:aac_at"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_DECODER_AACFIXED
+	bool "Enable decoder:aac_fixed"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_DECODER_AACLATM
+	bool "Enable decoder:aac_latm"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_DECODER_RKMPP
+	bool "Enable decoder:rk_mpp"
+	default n
+
+
+config RV_TARGET_FFMPEG_ENABLE_ENCODER_PCM16
+	bool "Enable encoder:16 bit PCM"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_ENCODER_PCM32
+	bool "Enable encoder:32 bit PCM"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_ENCODER_RKMPP
+	bool "Enable encoder:rk_mpp"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_MUXER_PCM32
+	bool "Enable muxer:32 bit PCM"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_MUXER_PCM16
+	bool "Enable muxer:16 bit PCM"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_MUXER_PCMALAW
+	bool "Enable muxer:pcm_alaw"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_MUXER_H264
+	bool "Enable muxer:h264"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_DEMUXER_PCM32
+	bool "Enable demuxer:32 bit PCM"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_DEMUXER_PCM16
+	bool "Enable demuxer:16 bit PCM"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_DEMUXER_PCMALAW
+	bool "Enable demuxer:pcm_alaw"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_DEMUXER_MJPEG
+	bool "Enable demuxer:mjpeg"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_DEMUXER_MJPEG2000
+	bool "Enable demuxer:mjpeg2000"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_DEMUXER_MPEGTSRAW
+	bool "Enable demuxer:mjpegtsraw"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_DEMUXER_MPJPEG
+	bool "Enable demuxer:mpjpeg"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_DEMUXER_MPL2
+	bool "Enable demuxer:mpl2"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_DEMUXER_IPMOVIE
+	bool "Enable demuxer:ipmovie"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_DEMUXER_MLP
+	bool "Enable demuxer:mlp"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_DEMUXER_MLV
+	bool "Enable demuxer:mlv"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_DEMUXER_MM
+	bool "Enable demuxer:mm"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_DEMUXER_MMF
+	bool "Enable demuxer:mmf"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_DEMUXER_MOV
+	bool "Enable demuxer:mov"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_DEMUXER_MP3
+	bool "Enable demuxer:mp3"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_DEMUXER_MPC
+	bool "Enable demuxer:mpc"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_DEMUXER_MPC8
+	bool "Enable demuxer:mpc8"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_DEMUXER_WAV
+	bool "Enable demuxer:wav"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_PARSER_H264
+	bool "Enable parser:h264"
+	default n
+
+endif
