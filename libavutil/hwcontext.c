@@ -27,6 +27,7 @@
 #include "mem.h"
 #include "pixdesc.h"
 #include "pixfmt.h"
+#include "hwcontext_ion.h"
 
 static const HWContextType * const hw_table[] = {
 #if CONFIG_CUDA
@@ -37,6 +38,8 @@ static const HWContextType * const hw_table[] = {
 #endif
 #if CONFIG_LIBDRM
     &ff_hwcontext_type_drm,
+#elif CONFIG_ION
+    &ff_hwcontext_type_ion,
 #endif
 #if CONFIG_DXVA2
     &ff_hwcontext_type_dxva2,
