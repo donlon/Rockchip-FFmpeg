@@ -35,13 +35,34 @@ config RV_TARGET_FFMPEG_NONFREE
 	  allow use of nonfree code, the resulting libs and binaries
 	  will be unredistributable
 
-config RV_TARGET_FFMPEG_DISABLE_FFPLAY
-	bool "Disable ffplay"
+config RV_TARGET_FFMPEG_ENABLE_ION
+	bool "Enable ion type for hwcontext table"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_VERSION3
+	bool "Enable version3"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_RKMPP
+	bool "Enable rkmpp"
+	default n
+
+config RV_TARGET_FFMPEG_DISABLE_FFMPEG
+	bool "Disable ffmpeg"
 	default n
 
 config RV_TARGET_FFMPEG_DISABLE_FFPORBE
 	bool "Disable ffprobe"
 	default n
+
+config RV_TARGET_FFMPEG_DISABLE_FFPLAY
+	bool "Disable ffplay"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_SDL
+	bool "Enable sdl for ffplay"
+	depends on (!RV_TARGET_FFMPEG_DISABLE_FFPLAY)
+	default y if (!RV_TARGET_FFMPEG_DISABLE_FFPLAY)
 
 config RV_TARGET_FFMPEG_DISABLE_COREIMAGE
 	bool "Disable core image"
@@ -59,24 +80,54 @@ config RV_TARGET_FFMPEG_DISABLE_BSFS
 	bool "Disable bsfs"
 	default n
 
+config RV_TARGET_FFMPEG_DISABLE_EVERYTHING
+	bool "Disable everything"
+	default y
+
 config RV_TARGET_FFMPEG_DISABLE_MUXERS
 	bool "Disable all muxers"
+	depends on (!RV_TARGET_FFMPEG_DISABLE_EVERYTHING)
 	default n
 
 config RV_TARGET_FFMPEG_DISABLE_DEMUXERS
 	bool "Disable all demuxers"
-	default n
-
-config RV_TARGET_FFMPEG_DISABLE_FILTERS
-	bool "Disable all filters"
+	depends on (!RV_TARGET_FFMPEG_DISABLE_EVERYTHING)
 	default n
 
 config RV_TARGET_FFMPEG_DISABLE_ENCODERS
 	bool "Disable all encoders"
+	depends on (!RV_TARGET_FFMPEG_DISABLE_EVERYTHING)
 	default n
 
 config RV_TARGET_FFMPEG_DISABLE_DECODERS
 	bool "Disable all decoders"
+	depends on (!RV_TARGET_FFMPEG_DISABLE_EVERYTHING)
+	default n
+
+config RV_TARGET_FFMPEG_DISABLE_DEVICES
+	bool "Disable all devices"
+	depends on (!RV_TARGET_FFMPEG_DISABLE_EVERYTHING)
+	default n
+
+config RV_TARGET_FFMPEG_DISABLE_FILTERS
+	bool "Disable all filters"
+	depends on (!RV_TARGET_FFMPEG_DISABLE_EVERYTHING)
+	default n
+
+config RV_TARGET_FFMPEG_DISABLE_AVDEVICES
+	bool "Disable all avdevices"
+	default n
+
+config RV_TARGET_FFMPEG_DISABLE_AVFILTERS
+	bool "Disable all avfilters"
+	default n
+
+config RV_TARGET_FFMPEG_DISABLE_SWSCALE
+	bool "Disable swscale"
+	default n
+
+config RV_TARGET_FFMPEG_DISABLE_SWRESAMPLE
+	bool "Disable swresample"
 	default n
 
 config RV_TARGET_FFMPEG_DEMUXER_H264
@@ -187,8 +238,29 @@ config RV_TARGET_FFMPEG_ENABLE_DECODER_AACLATM
 	bool "Enable decoder:aac_latm"
 	default n
 
+config RV_TARGET_FFMPEG_ENABLE_DECODER_AC3
+	bool "Enable decoder:ac3"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_DECODER_MPEG4
+	bool "Enable decoder:mpeg4"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_DECODER_H264
+	bool "Enable decoder:h264"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_DECODER_ASS
+	bool "Enable decoder:ass"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_DECODER_VORBIS
+	bool "Enable decoder:vorbis"
+	default n
+
 config RV_TARGET_FFMPEG_ENABLE_DECODER_RKMPP
 	bool "Enable decoder:rk_mpp"
+	depends on RV_TARGET_FFMPEG_ENABLE_RKMPP
 	default n
 
 
@@ -202,6 +274,7 @@ config RV_TARGET_FFMPEG_ENABLE_ENCODER_PCM32
 
 config RV_TARGET_FFMPEG_ENABLE_ENCODER_RKMPP
 	bool "Enable encoder:rk_mpp"
+	depends on RV_TARGET_FFMPEG_ENABLE_RKMPP
 	default n
 
 config RV_TARGET_FFMPEG_ENABLE_MUXER_PCM32
@@ -292,8 +365,28 @@ config RV_TARGET_FFMPEG_ENABLE_DEMUXER_WAV
 	bool "Enable demuxer:wav"
 	default n
 
+config RV_TARGET_FFMPEG_ENABLE_DEMUXER_AC3
+	bool "Enable demuxer:ac3"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_DEMUXER_MPEGVIDEO
+	bool "Enable demuxer:mpegvideo"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_DEMUXER_MATROSKA
+	bool "Enable demuxer:matroska"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_DEMUXER_ASS
+	bool "Enable demuxer:ass"
+	default n
+
 config RV_TARGET_FFMPEG_ENABLE_PARSER_H264
 	bool "Enable parser:h264"
+	default n
+
+config RV_TARGET_FFMPEG_ENABLE_FILTER_ARESAMPLE
+	bool "Enable filter:aresample"
 	default n
 
 endif
