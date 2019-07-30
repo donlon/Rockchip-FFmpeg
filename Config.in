@@ -120,7 +120,7 @@ config RV_TARGET_FFMPEG_DISABLE_AVDEVICES
 
 config RV_TARGET_FFMPEG_DISABLE_AVFILTERS
 	bool "Disable all avfilters"
-	default n
+	default y
 
 config RV_TARGET_FFMPEG_DISABLE_SWSCALE
 	bool "Disable swscale"
