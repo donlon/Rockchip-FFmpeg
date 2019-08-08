@@ -22,6 +22,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "imgutils.h"
+
 /**
  * @file
  * API-specific header for AV_HWDEVICE_TYPE_DRM.
@@ -171,5 +173,7 @@ typedef struct AVDRMDeviceContext {
      */
     int fd;
 } AVDRMDeviceContext;
+
+enum AVPixelFormat av_drm_get_pixfmt(uint32_t drm_format);
 
 #endif /* AVUTIL_HWCONTEXT_DRM_H */

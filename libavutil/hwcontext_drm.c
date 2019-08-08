@@ -28,7 +28,6 @@
 #include "hwcontext.h"
 #include "hwcontext_drm.h"
 #include "hwcontext_internal.h"
-#include "imgutils.h"
 
 /**
  * Copy from libdrm_macros.h while is not exposed by libdrm,
@@ -91,6 +90,18 @@ static const struct {
     enum AVPixelFormat pixfmt;
     uint32_t drm_format;
 } supported_formats[] = {
+    { AV_PIX_FMT_NV12,      DRM_FORMAT_NV12,        },
+#ifdef DRM_FORMAT_NV12_10
+    { AV_PIX_FMT_P010LE,    DRM_FORMAT_NV12_10,     },
+    { AV_PIX_FMT_P010BE,    DRM_FORMAT_NV12_10  | DRM_FORMAT_BIG_ENDIAN },
+#endif
+    { AV_PIX_FMT_NV21,      DRM_FORMAT_NV21,        },
+    { AV_PIX_FMT_YUV420P,   DRM_FORMAT_YUV420,      },
+    { AV_PIX_FMT_YUYV422,   DRM_FORMAT_YUYV,        },
+    { AV_PIX_FMT_YVYU422,   DRM_FORMAT_YVYU,        },
+    { AV_PIX_FMT_UYVY422,   DRM_FORMAT_UYVY,        },
+    { AV_PIX_FMT_NV16,      DRM_FORMAT_NV16,        },
+    { AV_PIX_FMT_YUV422P,   DRM_FORMAT_YUV422,      },
 #ifdef DRM_FORMAT_R16
     { AV_PIX_FMT_GRAY16LE,  DRM_FORMAT_R16,         },
     { AV_PIX_FMT_GRAY16BE,  DRM_FORMAT_R16      | DRM_FORMAT_BIG_ENDIAN },
@@ -114,16 +125,15 @@ static const struct {
     { AV_PIX_FMT_ABGR,      DRM_FORMAT_RGBA8888,    },
     { AV_PIX_FMT_RGBA,      DRM_FORMAT_ABGR8888,    },
     { AV_PIX_FMT_BGRA,      DRM_FORMAT_ARGB8888,    },
-    { AV_PIX_FMT_YUYV422,   DRM_FORMAT_YUYV,        },
-    { AV_PIX_FMT_YVYU422,   DRM_FORMAT_YVYU,        },
-    { AV_PIX_FMT_UYVY422,   DRM_FORMAT_UYVY,        },
-    { AV_PIX_FMT_NV16,      DRM_FORMAT_NV16,        },
-    { AV_PIX_FMT_YUV422P,   DRM_FORMAT_YUV422,      },
-    { AV_PIX_FMT_NV21,      DRM_FORMAT_NV21,        },
-    { AV_PIX_FMT_NV12,      DRM_FORMAT_NV12,        },
-    { AV_PIX_FMT_P010,      DRM_FORMAT_NV12_10,     },
-    { AV_PIX_FMT_YUV420P,   DRM_FORMAT_YUV420,      },
 };
+
+enum AVPixelFormat av_drm_get_pixfmt(uint32_t drm_format) {
+    for (int i = 0; i < FF_ARRAY_ELEMS(supported_formats); i++) {
+        if (supported_formats[i].drm_format == drm_format)
+            return supported_formats[i].pixfmt;
+    }
+    return AV_PIX_FMT_NONE;
+}
 
 static void drm_device_free(AVHWDeviceContext *hwdev)
 {
