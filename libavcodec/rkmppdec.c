@@ -39,7 +39,7 @@
 #include "libavutil/imgutils.h"
 #include "libavutil/log.h"
 
-#define RECEIVE_FRAME_TIMEOUT   10
+#define RECEIVE_FRAME_TIMEOUT   100
 #define FRAMEGROUP_MAX_FRAMES   16
 #define INPUT_MAX_PACKETS       4
 
@@ -83,8 +83,8 @@ static int rkmpp_write_nv12(MppBuffer mpp_buffer, int mpp_vir_width,
                             int mpp_vir_height, AVFrame* dst_frame) {
     rga_info_t src_info = {0};
     rga_info_t dst_info = {0};
-    int width = dst_frame->width;
-    int height = dst_frame->height;
+    int width = dst_frame->width - (dst_frame->crop_right + dst_frame->crop_left);
+    int height = dst_frame->height - (dst_frame->crop_bottom + dst_frame->crop_top);
     int possible_height;
     int rga_format = get_rga_format(dst_frame->format);
 
@@ -106,11 +106,6 @@ static int rkmpp_write_nv12(MppBuffer mpp_buffer, int mpp_vir_width,
         goto bail; // mostly is not continuous memory
     }
 
-    if (possible_height != height && possible_height != mpp_vir_height)
-        av_log(NULL, AV_LOG_WARNING,
-            "dst frame possiable %d is strange, expect %d or %d\n",
-            possible_height, height, mpp_vir_height);
-
     src_info.fd = mpp_buffer_get_fd(mpp_buffer);
     src_info.mmuFlag = 1;
     // mpp decoder always return nv12(yuv420sp)
@@ -121,8 +116,9 @@ static int rkmpp_write_nv12(MppBuffer mpp_buffer, int mpp_vir_width,
     // dst_frame data[*] must be continuous
     dst_info.virAddr = dst_frame->data[0];
     dst_info.mmuFlag = 1;
-    rga_set_rect(&dst_info.rect, 0, 0, width, height, dst_frame->linesize[0],
-        possible_height, rga_format);
+    rga_set_rect(&dst_info.rect, dst_frame->crop_left, dst_frame->crop_top,
+                 width, height, dst_frame->linesize[0], possible_height,
+                 rga_format);
     if (c_RkRgaBlit(&src_info, &dst_info, NULL) < 0) {
         av_log(NULL, AV_LOG_ERROR, "Failed to do rga blit\n");
         goto bail;
@@ -460,6 +456,51 @@ static void rkmpp_setinfo_avframe(AVFrame *frame, MppFrame mppframe) {
     frame->top_field_first  = ((mode & MPP_FRAME_FLAG_FIELD_ORDER_MASK) == MPP_FRAME_FLAG_TOP_FIRST);
 }
 
+static int rkmpp_get_continue_video_buffer(AVFrame *frame) {
+    const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(frame->format);
+    int ret, i, padded_height;
+
+    if (!desc)
+        return AVERROR(EINVAL);
+
+    if ((ret = av_image_check_size(frame->width, frame->height, 0, NULL)) < 0)
+        return ret;
+
+    if (!frame->linesize[0]) {
+        for(i=1; i<=16; i+=i) {
+            ret = av_image_fill_linesizes(frame->linesize, frame->format,
+                                          FFALIGN(frame->width, i));
+            if (ret < 0)
+                return ret;
+            // rga need 16 align
+            if (!(frame->linesize[0] & (16-1)))
+                break;
+        }
+    }
+
+    padded_height = frame->height;
+    if ((ret = av_image_fill_pointers(frame->data, frame->format, padded_height,
+                                      NULL, frame->linesize)) < 0)
+        return ret;
+
+    frame->buf[0] = av_buffer_alloc(ret + 4 * 16);
+    if (!frame->buf[0]) {
+        ret = AVERROR(ENOMEM);
+        goto fail;
+    }
+
+    if ((ret = av_image_fill_pointers(frame->data, frame->format, padded_height,
+                                      frame->buf[0]->data, frame->linesize)) < 0)
+        goto fail;
+
+    frame->extended_data = frame->data;
+
+    return 0;
+fail:
+    av_frame_unref(frame);
+    return ret;
+}
+
 static int rkmpp_retrieve_frame(AVCodecContext *avctx, AVFrame *frame)
 {
     RKMPPDecodeContext *rk_context = avctx->priv_data;
@@ -491,6 +532,9 @@ static int rkmpp_retrieve_frame(AVCodecContext *avctx, AVFrame *frame)
 
             avctx->width = mpp_frame_get_width(mppframe);
             avctx->height = mpp_frame_get_height(mppframe);
+            // chromium will align u/v width height to 32
+            avctx->coded_width = FFALIGN(avctx->width, 64);
+            avctx->coded_height = FFALIGN(avctx->height, 64);
 
             decoder->mpi->control(decoder->ctx, MPP_DEC_SET_INFO_CHANGE_READY, NULL);
 
@@ -537,8 +581,12 @@ static int rkmpp_retrieve_frame(AVCodecContext *avctx, AVFrame *frame)
 
         // setup general frame fields
         frame->format           = avctx->pix_fmt;
-        frame->width            = mpp_frame_get_width(mppframe);
-        frame->height           = mpp_frame_get_height(mppframe);
+        frame->width            = avctx->coded_width;
+        frame->height           = avctx->coded_height;
+        frame->crop_left        = 0;
+        frame->crop_right       = avctx->coded_width - mpp_frame_get_width(mppframe);
+        frame->crop_top         = 0;
+        frame->crop_bottom      = avctx->coded_height - mpp_frame_get_height(mppframe);
 
         mppformat = mpp_frame_get_fmt(mppframe);
         drmformat = rkmpp_get_frameformat(mppformat);
@@ -547,10 +595,12 @@ static int rkmpp_retrieve_frame(AVCodecContext *avctx, AVFrame *frame)
         buffer = mpp_frame_get_buffer(mppframe);
         if (buffer) {
             if (avctx->pix_fmt != AV_PIX_FMT_DRM_PRIME) {
-                if (avctx->get_buffer2 == avcodec_default_get_buffer2)
-                    ret = av_frame_get_buffer(frame, 0);
-                else
+                if (avctx->get_buffer2 == avcodec_default_get_buffer2) {
+                    // firefox path
+                    ret = rkmpp_get_continue_video_buffer(frame);
+                } else {
                     ret = ff_get_buffer(avctx, frame, 0);
+                }
                 if (ret) {
                     av_log(avctx, AV_LOG_ERROR, "Fail to alloc frame.\n");
                     goto fail;
