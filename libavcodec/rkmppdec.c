@@ -70,7 +70,7 @@ typedef struct {
 static int get_rga_format(int av_fmt) {
     switch (av_fmt) {
         case AV_PIX_FMT_NV12:
-            return RK_FORMAT_YCrCb_420_SP;
+            return RK_FORMAT_YCbCr_420_SP;
         case AV_PIX_FMT_YUV420P:
             return RK_FORMAT_YCbCr_420_P;
         default:
@@ -110,7 +110,7 @@ static int rkmpp_write_nv12(MppBuffer mpp_buffer, int mpp_vir_width,
     src_info.mmuFlag = 1;
     // mpp decoder always return nv12(yuv420sp)
     rga_set_rect(&src_info.rect, 0, 0, width, height,
-                 mpp_vir_width, mpp_vir_height, RK_FORMAT_YCrCb_420_SP);
+                 mpp_vir_width, mpp_vir_height, RK_FORMAT_YCbCr_420_SP);
 
     dst_info.fd = -1;
     // dst_frame data[*] must be continuous
