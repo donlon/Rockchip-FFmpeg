@@ -259,16 +259,7 @@ static int rkmpp_init_decoder(AVCodecContext *avctx)
     RK_S64 paramS64;
     RK_S32 paramS32;
 
-    if (avctx->pix_fmt == AV_PIX_FMT_NONE &&
-        avctx->sw_pix_fmt == AV_PIX_FMT_NONE) {
-        // chromium only support AV_PIX_FMT_YUV420P
-        avctx->pix_fmt = avctx->sw_pix_fmt = AV_PIX_FMT_YUV420P;
-    } else {
-        if (avctx->pix_fmt == AV_PIX_FMT_NONE)
-            avctx->pix_fmt = AV_PIX_FMT_DRM_PRIME;
-        avctx->sw_pix_fmt = (avctx->pix_fmt == AV_PIX_FMT_DRM_PRIME) ?
-                            AV_PIX_FMT_NV12 : avctx->pix_fmt;
-    }
+    avctx->pix_fmt = ff_get_format(avctx, avctx->codec->pix_fmts);
 
     // create a decoder and a ref to it
     decoder = av_mallocz(sizeof(RKMPPDecoder));
