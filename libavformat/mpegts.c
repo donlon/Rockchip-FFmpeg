@@ -2454,13 +2454,12 @@ static int parse_pcr(int64_t *ppcr_high, int *ppcr_low,
                      const uint8_t *packet);
 
 /* handle one TS packet */
-static int handle_packet(MpegTSContext *ts, const uint8_t *packet)
+static int handle_packet(MpegTSContext *ts, const uint8_t *packet, int64_t pos)
 {
     MpegTSFilter *tss;
     int len, pid, cc, expected_cc, cc_ok, afc, is_start, is_discontinuity,
         has_adaptation, has_payload;
     const uint8_t *p, *p_end;
-    int64_t pos;
 
     pid = AV_RB16(packet + 1) & 0x1fff;
     if (pid && discard_pid(ts, pid))
@@ -2525,7 +2524,6 @@ static int handle_packet(MpegTSContext *ts, const uint8_t *packet)
     if (p >= p_end || !has_payload)
         return 0;
 
-    pos = avio_tell(ts->stream->pb);
     if (pos >= 0) {
         av_assert0(pos >= TS_PACKET_SIZE);
         ts->pos47_full = pos - TS_PACKET_SIZE;
@@ -2633,14 +2631,15 @@ static int mpegts_resync(AVFormatContext *s, int seekback, const uint8_t *curren
     AVIOContext *pb = s->pb;
     int c, i;
     uint64_t pos = avio_tell(pb);
-
-    avio_seek(pb, -FFMIN(seekback, pos), SEEK_CUR);
+    int64_t back = FFMIN(seekback, pos);
 
     //Special case for files like 01c56b0dc1.ts
     if (current_packet[0] == 0x80 && current_packet[12] == 0x47) {
-        avio_seek(pb, 12, SEEK_CUR);
+        avio_seek(pb, 12 - back, SEEK_CUR);
         return 0;
     }
+
+    avio_seek(pb, -back, SEEK_CUR);
 
     for (i = 0; i < ts->resync_size; i++) {
         c = avio_r8(pb);
@@ -2736,7 +2735,7 @@ static int handle_packets(MpegTSContext *ts, int64_t nb_packets)
         ret = read_packet(s, packet, ts->raw_packet_size, &data);
         if (ret != 0)
             break;
-        ret = handle_packet(ts, data);
+        ret = handle_packet(ts, data, avio_tell(s->pb));
         finished_reading_packet(s, ts->raw_packet_size);
         if (ret != 0)
             break;
@@ -3133,7 +3132,7 @@ int avpriv_mpegts_parse_packet(MpegTSContext *ts, AVPacket *pkt,
             buf++;
             len--;
         } else {
-            handle_packet(ts, buf);
+            handle_packet(ts, buf, len1 - len + TS_PACKET_SIZE);
             buf += TS_PACKET_SIZE;
             len -= TS_PACKET_SIZE;
             if (ts->stop_parse == 1)

@@ -859,6 +859,7 @@ static inline int mxf_read_utf16_string(AVIOContext *pb, int size, char** str, i
         return AVERROR(EINVAL);
 
     buf_size = size + size / 2 + 1;
+    av_free(*str);
     *str = av_malloc(buf_size);
     if (!*str)
         return AVERROR(ENOMEM);
@@ -3542,6 +3543,7 @@ static int mxf_read_close(AVFormatContext *s)
     for (i = 0; i < mxf->metadata_sets_count; i++) {
         mxf_free_metadataset(mxf->metadata_sets + i, 1);
     }
+    mxf->metadata_sets_count = 0;
     av_freep(&mxf->partitions);
     av_freep(&mxf->metadata_sets);
     av_freep(&mxf->aesc);

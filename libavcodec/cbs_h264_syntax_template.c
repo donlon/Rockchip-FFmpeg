@@ -137,6 +137,10 @@ static int FUNC(vui_parameters)(CodedBitstreamContext *ctx, RWContext *rw,
             u(8, colour_primaries,         0, 255);
             u(8, transfer_characteristics, 0, 255);
             u(8, matrix_coefficients,      0, 255);
+        } else {
+            infer(colour_primaries,         2);
+            infer(transfer_characteristics, 2);
+            infer(matrix_coefficients,      2);
         }
     } else {
         infer(video_format,             5);
@@ -592,8 +596,9 @@ static int FUNC(sei_pic_timestamp)(CodedBitstreamContext *ctx, RWContext *rw,
         time_offset_length = 24;
 
     if (time_offset_length > 0)
-        u(time_offset_length, time_offset,
-          0, MAX_UINT_BITS(time_offset_length));
+        i(time_offset_length, time_offset,
+          MIN_INT_BITS(time_offset_length),
+          MAX_INT_BITS(time_offset_length));
     else
         infer(time_offset, 0);
 
@@ -1190,11 +1195,10 @@ static int FUNC(slice_header)(CodedBitstreamContext *ctx, RWContext *rw,
                    "in the same access unit.\n");
             return AVERROR_INVALIDDATA;
         }
+        idr_pic_flag = h264->last_slice_nal_unit_type == H264_NAL_IDR_SLICE;
     } else {
-        h264->last_slice_nal_unit_type =
-            current->nal_unit_header.nal_unit_type;
+        idr_pic_flag = current->nal_unit_header.nal_unit_type == H264_NAL_IDR_SLICE;
     }
-    idr_pic_flag = h264->last_slice_nal_unit_type == H264_NAL_IDR_SLICE;
 
     ue(first_mb_in_slice, 0, H264_MAX_MB_PIC_SIZE - 1);
     ue(slice_type, 0, 9);
@@ -1272,6 +1276,13 @@ static int FUNC(slice_header)(CodedBitstreamContext *ctx, RWContext *rw,
 
     if (pps->redundant_pic_cnt_present_flag)
         ue(redundant_pic_cnt, 0, 127);
+    else
+        infer(redundant_pic_cnt, 0);
+
+    if (current->nal_unit_header.nal_unit_type != H264_NAL_AUXILIARY_SLICE
+        && !current->redundant_pic_cnt)
+        h264->last_slice_nal_unit_type =
+            current->nal_unit_header.nal_unit_type;
 
     if (slice_type_b)
         flag(direct_spatial_mv_pred_flag);
@@ -1344,7 +1355,7 @@ static int FUNC(slice_header)(CodedBitstreamContext *ctx, RWContext *rw,
                    (sps->pic_height_in_map_units_minus1 + 1);
         max = (pic_size + pps->slice_group_change_rate_minus1) /
               (pps->slice_group_change_rate_minus1 + 1);
-        bits = av_log2(2 * max - 1);
+        bits = av_ceil_log2(max + 1);
 
         u(bits, slice_group_change_cycle, 0, max);
     }

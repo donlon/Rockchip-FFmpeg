@@ -61,7 +61,7 @@ typedef struct AVIStream {
 
     AVFormatContext *sub_ctx;
     AVPacket sub_pkt;
-    uint8_t *sub_buffer;
+    AVBufferRef *sub_buffer;
 
     int64_t seek_pos;
 } AVIStream;
@@ -1118,8 +1118,9 @@ static int read_gab2_sub(AVFormatContext *s, AVStream *st, AVPacket *pkt)
             time_base = ast->sub_ctx->streams[0]->time_base;
             avpriv_set_pts_info(st, 64, time_base.num, time_base.den);
         }
-        ast->sub_buffer = pkt->data;
-        memset(pkt, 0, sizeof(*pkt));
+        ast->sub_buffer = pkt->buf;
+        pkt->buf = NULL;
+        av_packet_unref(pkt);
         return 1;
 
 error:
@@ -1528,11 +1529,12 @@ resync:
         if (!avi->non_interleaved && st->nb_index_entries>1 && avi->index_loaded>1) {
             int64_t dts= av_rescale_q(pkt->dts, st->time_base, AV_TIME_BASE_Q);
 
-            if (avi->dts_max - dts > 2*AV_TIME_BASE) {
+            if (avi->dts_max < dts) {
+                avi->dts_max = dts;
+            } else if (avi->dts_max - (uint64_t)dts > 2*AV_TIME_BASE) {
                 avi->non_interleaved= 1;
                 av_log(s, AV_LOG_INFO, "Switching to NI mode, due to poor interleaving\n");
-            }else if (avi->dts_max < dts)
-                avi->dts_max = dts;
+            }
         }
 
         return 0;
@@ -1910,7 +1912,7 @@ static int avi_read_close(AVFormatContext *s)
                 av_freep(&ast->sub_ctx->pb);
                 avformat_close_input(&ast->sub_ctx);
             }
-            av_freep(&ast->sub_buffer);
+            av_buffer_unref(&ast->sub_buffer);
             av_packet_unref(&ast->sub_pkt);
         }
     }

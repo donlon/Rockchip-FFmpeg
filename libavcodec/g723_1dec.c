@@ -667,7 +667,9 @@ static int estimate_sid_gain(G723_1_Context *p)
             if (p->sid_gain < 0) t = INT32_MIN;
             else                 t = INT32_MAX;
         } else
-            t = p->sid_gain << shift;
+            t = p->sid_gain * (1 << shift);
+    } else if(shift < -31) {
+        t = (p->sid_gain < 0) ? -1 : 0;
     }else
         t = p->sid_gain >> -shift;
     x = av_clipl_int32(t * (int64_t)cng_filt[0] >> 16);

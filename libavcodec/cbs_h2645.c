@@ -255,6 +255,8 @@ static int cbs_write_se_golomb(CodedBitstreamContext *ctx, PutBitContext *pbc,
 #define flag(name) u(1, name, 0, 1)
 #define ue(name, range_min, range_max) \
         xue(name, current->name, range_min, range_max, 0)
+#define i(width, name, range_min, range_max) \
+        xi(width, name, current->name, range_min, range_max, 0)
 #define se(name, range_min, range_max) \
         xse(name, current->name, range_min, range_max, 0)
 
@@ -264,6 +266,8 @@ static int cbs_write_se_golomb(CodedBitstreamContext *ctx, PutBitContext *pbc,
         xu(1, name, current->name, 0, 1, subs, __VA_ARGS__)
 #define ues(name, range_min, range_max, subs, ...) \
         xue(name, current->name, range_min, range_max, subs, __VA_ARGS__)
+#define is(width, name, range_min, range_max, subs, ...) \
+        xi(width, name, current->name, range_min, range_max, subs, __VA_ARGS__)
 #define ses(name, range_min, range_max, subs, ...) \
         xse(name, current->name, range_min, range_max, subs, __VA_ARGS__)
 
@@ -291,6 +295,13 @@ static int cbs_write_se_golomb(CodedBitstreamContext *ctx, PutBitContext *pbc,
                                  &value, range_min, range_max)); \
         var = value; \
     } while (0)
+#define xi(width, name, var, range_min, range_max, subs, ...) do { \
+        int32_t value = range_min; \
+        CHECK(ff_cbs_read_signed(ctx, rw, width, #name, \
+                                 SUBSCRIPTS(subs, __VA_ARGS__), \
+                                 &value, range_min, range_max)); \
+        var = value; \
+    } while (0)
 #define xse(name, var, range_min, range_max, subs, ...) do { \
         int32_t value = range_min; \
         CHECK(cbs_read_se_golomb(ctx, rw, #name, \
@@ -309,9 +320,11 @@ static int cbs_h2645_read_more_rbsp_data(GetBitContext *gbc)
     int bits_left = get_bits_left(gbc);
     if (bits_left > 8)
         return 1;
-    if (show_bits(gbc, bits_left) == 1 << (bits_left - 1))
+    if (bits_left == 0)
         return 0;
-    return 1;
+    if (show_bits(gbc, bits_left) & MAX_UINT_BITS(bits_left - 1))
+        return 1;
+    return 0;
 }
 
 #define more_rbsp_data(var) ((var) = cbs_h2645_read_more_rbsp_data(rw))
@@ -338,6 +351,7 @@ static int cbs_h2645_read_more_rbsp_data(GetBitContext *gbc)
 #undef READWRITE
 #undef RWContext
 #undef xu
+#undef xi
 #undef xue
 #undef xse
 #undef infer
@@ -359,6 +373,12 @@ static int cbs_h2645_read_more_rbsp_data(GetBitContext *gbc)
 #define xue(name, var, range_min, range_max, subs, ...) do { \
         uint32_t value = var; \
         CHECK(cbs_write_ue_golomb(ctx, rw, #name, \
+                                  SUBSCRIPTS(subs, __VA_ARGS__), \
+                                  value, range_min, range_max)); \
+    } while (0)
+#define xi(width, name, var, range_min, range_max, subs, ...) do { \
+        int32_t value = var; \
+        CHECK(ff_cbs_write_signed(ctx, rw, width, #name, \
                                   SUBSCRIPTS(subs, __VA_ARGS__), \
                                   value, range_min, range_max)); \
     } while (0)
@@ -402,9 +422,11 @@ static int cbs_h2645_read_more_rbsp_data(GetBitContext *gbc)
 #undef READWRITE
 #undef RWContext
 #undef xu
+#undef xi
 #undef xue
 #undef xse
 #undef u
+#undef i
 #undef flag
 #undef ue
 #undef se
@@ -522,7 +544,10 @@ static int cbs_h2645_fragment_add_nals(CodedBitstreamContext *ctx,
         // Remove trailing zeroes.
         while (size > 0 && nal->data[size - 1] == 0)
             --size;
-        av_assert0(size > 0);
+        if (size == 0) {
+            av_log(ctx->log_ctx, AV_LOG_VERBOSE, "Discarding empty 0 NAL unit\n");
+            continue;
+        }
 
         data = av_malloc(size + AV_INPUT_BUFFER_PADDING_SIZE);
         if (!data)
@@ -707,7 +732,7 @@ static int cbs_h26 ## h26n ## _replace_ ## ps_var(CodedBitstreamContext *ctx, \
     CodedBitstreamH26 ## h26n ## Context *priv = ctx->priv_data; \
     H26 ## h26n ## Raw ## ps_name *ps_var = unit->content; \
     unsigned int id = ps_var->id_element; \
-    if (id > FF_ARRAY_ELEMS(priv->ps_var)) { \
+    if (id >= FF_ARRAY_ELEMS(priv->ps_var)) { \
         av_log(ctx->log_ctx, AV_LOG_ERROR, "Invalid " #ps_name \
                " id : %d.\n", id); \
         return AVERROR_INVALIDDATA; \
@@ -814,15 +839,11 @@ static int cbs_h264_read_nal_unit(CodedBitstreamContext *ctx,
             if (err < 0)
                 return err;
 
+            if (!cbs_h2645_read_more_rbsp_data(&gbc))
+                return AVERROR_INVALIDDATA;
+
             pos = get_bits_count(&gbc);
             len = unit->data_size;
-            if (!unit->data[len - 1]) {
-                int z;
-                for (z = 0; z < len && !unit->data[len - z - 1]; z++);
-                av_log(ctx->log_ctx, AV_LOG_DEBUG, "Deleted %d trailing zeroes "
-                       "from slice data.\n", z);
-                len -= z;
-            }
 
             slice->data_size = len - pos / 8;
             slice->data_ref  = av_buffer_ref(unit->data_ref);
@@ -996,15 +1017,11 @@ static int cbs_h265_read_nal_unit(CodedBitstreamContext *ctx,
             if (err < 0)
                 return err;
 
+            if (!cbs_h2645_read_more_rbsp_data(&gbc))
+                return AVERROR_INVALIDDATA;
+
             pos = get_bits_count(&gbc);
             len = unit->data_size;
-            if (!unit->data[len - 1]) {
-                int z;
-                for (z = 0; z < len && !unit->data[len - z - 1]; z++);
-                av_log(ctx->log_ctx, AV_LOG_DEBUG, "Deleted %d trailing zeroes "
-                       "from slice data.\n", z);
-                len -= z;
-            }
 
             slice->data_size = len - pos / 8;
             slice->data_ref  = av_buffer_ref(unit->data_ref);
