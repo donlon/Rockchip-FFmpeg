@@ -610,7 +610,7 @@ static inline int get_amv(Mpeg4DecContext *ctx, int n)
             dy -= 1 << (shift + a + 1);
         else
             dx -= 1 << (shift + a + 1);
-        mb_v = s->sprite_offset[0][n] + dx * s->mb_x * 16 + dy * s->mb_y * 16;
+        mb_v = s->sprite_offset[0][n] + dx * s->mb_x * 16U + dy * s->mb_y * 16U;
 
         sum = 0;
         for (y = 0; y < 16; y++) {
@@ -1826,6 +1826,7 @@ static int mpeg4_decode_studio_block(MpegEncContext *s, int32_t block[64], int n
     uint32_t flc;
     const int min = -1 *  (1 << (s->avctx->bits_per_raw_sample + 6));
     const int max =      ((1 << (s->avctx->bits_per_raw_sample + 6)) - 1);
+    int shift =  3 - s->dct_precision;
 
     mismatch = 1;
 
@@ -1921,7 +1922,7 @@ static int mpeg4_decode_studio_block(MpegEncContext *s, int32_t block[64], int n
             else
                 block[j] = flc;
         }
-        block[j] = ((8 * 2 * block[j] * quant_matrix[j] * s->qscale) >> s->dct_precision) / 32;
+        block[j] = ((block[j] * quant_matrix[j] * s->qscale) * (1 << shift)) / 16;
         block[j] = av_clip(block[j], min, max);
         mismatch ^= block[j];
     }
@@ -3133,6 +3134,7 @@ static int decode_studio_vol_header(Mpeg4DecContext *ctx, GetBitContext *gb)
     MpegEncContext *s = &ctx->m;
     int width, height;
     int bits_per_raw_sample;
+    int rgb, chroma_format;
 
             // random_accessible_vol and video_object_type_indication have already
             // been read by the caller decode_vol_header()
@@ -3140,28 +3142,36 @@ static int decode_studio_vol_header(Mpeg4DecContext *ctx, GetBitContext *gb)
             ctx->shape = get_bits(gb, 2); /* video_object_layer_shape */
             skip_bits(gb, 4); /* video_object_layer_shape_extension */
             skip_bits1(gb); /* progressive_sequence */
+            if (ctx->shape != RECT_SHAPE) {
+                avpriv_request_sample(s->avctx, "MPEG-4 Studio profile non rectangular shape");
+                return AVERROR_PATCHWELCOME;
+            }
             if (ctx->shape != BIN_ONLY_SHAPE) {
-                ctx->rgb = get_bits1(gb); /* rgb_components */
-                s->chroma_format = get_bits(gb, 2); /* chroma_format */
-                if (!s->chroma_format) {
+                rgb = get_bits1(gb); /* rgb_components */
+                chroma_format = get_bits(gb, 2); /* chroma_format */
+                if (!chroma_format || chroma_format == CHROMA_420 || (rgb && chroma_format == CHROMA_422)) {
                     av_log(s->avctx, AV_LOG_ERROR, "illegal chroma format\n");
                     return AVERROR_INVALIDDATA;
                 }
 
                 bits_per_raw_sample = get_bits(gb, 4); /* bit_depth */
                 if (bits_per_raw_sample == 10) {
-                    if (ctx->rgb) {
+                    if (rgb) {
                         s->avctx->pix_fmt = AV_PIX_FMT_GBRP10;
                     }
                     else {
-                        s->avctx->pix_fmt = s->chroma_format == CHROMA_422 ? AV_PIX_FMT_YUV422P10 : AV_PIX_FMT_YUV444P10;
+                        s->avctx->pix_fmt = chroma_format == CHROMA_422 ? AV_PIX_FMT_YUV422P10 : AV_PIX_FMT_YUV444P10;
                     }
                 }
                 else {
                     avpriv_request_sample(s->avctx, "MPEG-4 Studio profile bit-depth %u", bits_per_raw_sample);
                     return AVERROR_PATCHWELCOME;
                 }
+                if (rgb != ctx->rgb || s->chroma_format != chroma_format)
+                    s->context_reinit = 1;
                 s->avctx->bits_per_raw_sample = bits_per_raw_sample;
+                ctx->rgb = rgb;
+                s->chroma_format = chroma_format;
             }
             if (ctx->shape == RECT_SHAPE) {
                 check_marker(s->avctx, gb, "before video_object_layer_width");

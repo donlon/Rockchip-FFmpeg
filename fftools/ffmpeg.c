@@ -567,6 +567,7 @@ static void ffmpeg_cleanup(int ret)
         ost->audio_channels_mapped = 0;
 
         av_dict_free(&ost->sws_dict);
+        av_dict_free(&ost->swr_opts);
 
         avcodec_free_context(&ost->enc_ctx);
         avcodec_parameters_free(&ost->ref_par);
@@ -4241,7 +4242,8 @@ static int seek_to_start(InputFile *ifile, AVFormatContext *is)
             ifile->time_base = ist->st->time_base;
         /* the total duration of the stream, max_pts - min_pts is
          * the duration of the stream without the last frame */
-        duration += ist->max_pts - ist->min_pts;
+        if (ist->max_pts > ist->min_pts && ist->max_pts - (uint64_t)ist->min_pts < INT64_MAX - duration)
+            duration += ist->max_pts - ist->min_pts;
         ifile->time_base = duration_max(duration, &ifile->duration, ist->st->time_base,
                                         ifile->time_base);
     }

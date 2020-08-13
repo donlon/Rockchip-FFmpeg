@@ -264,6 +264,9 @@ static av_cold int pcm_decode_init(AVCodecContext *avctx)
         break;
     case AV_CODEC_ID_PCM_F16LE:
     case AV_CODEC_ID_PCM_F24LE:
+        if (avctx->bits_per_coded_sample < 1 || avctx->bits_per_coded_sample > 24)
+            return AVERROR_INVALIDDATA;
+
         s->scale = 1. / (1 << (avctx->bits_per_coded_sample - 1));
         s->fdsp = avpriv_float_dsp_alloc(0);
         if (!s->fdsp)
@@ -303,7 +306,7 @@ static av_cold int pcm_decode_close(AVCodecContext *avctx)
 #define DECODE(size, endian, src, dst, n, shift, offset)                \
     for (; n > 0; n--) {                                                \
         uint ## size ## _t v = bytestream_get_ ## endian(&src);         \
-        AV_WN ## size ## A(dst, (v - offset) << shift);                 \
+        AV_WN ## size ## A(dst, (uint ## size ## _t)(v - offset) << shift); \
         dst += size / 8;                                                \
     }
 
@@ -314,7 +317,7 @@ static av_cold int pcm_decode_close(AVCodecContext *avctx)
         dst = frame->extended_data[c];                                \
         for (i = n; i > 0; i--) {                                       \
             uint ## size ## _t v = bytestream_get_ ## endian(&src);     \
-            AV_WN ## size ## A(dst, (v - offset) << shift);             \
+            AV_WN ## size ## A(dst, (uint ## size ##_t)(v - offset) << shift); \
             dst += size / 8;                                            \
         }                                                               \
     }
@@ -512,13 +515,13 @@ static int pcm_decode_frame(AVCodecContext *avctx, void *data,
             dst_int32_t = (int32_t *)frame->extended_data[c];
             for (i = 0; i < n; i++) {
                 // extract low 20 bits and expand to 32 bits
-                *dst_int32_t++ =  (src[2]         << 28) |
+                *dst_int32_t++ =  ((uint32_t)src[2]<<28) |
                                   (src[1]         << 20) |
                                   (src[0]         << 12) |
                                  ((src[2] & 0x0F) <<  8) |
                                    src[1];
                 // extract high 20 bits and expand to 32 bits
-                *dst_int32_t++ =  (src[4]         << 24) |
+                *dst_int32_t++ =  ((uint32_t)src[4]<<24) |
                                   (src[3]         << 16) |
                                  ((src[2] & 0xF0) <<  8) |
                                   (src[4]         <<  4) |

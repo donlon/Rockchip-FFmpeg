@@ -356,7 +356,8 @@ static int decompress_68(AVCodecContext *avctx, unsigned skip, unsigned use8)
                     if (val != ((1 << lbits) - 1)) {
                         break;
                     }
-                    assert(lbits < 16);
+                    if (lbits >= 16)
+                        return AVERROR_INVALIDDATA;
                 }
                 for (i = 0; i < len; i++) {
                     bytestream2_put_byte(pb, bytestream2_get_byte(gb));
@@ -475,6 +476,8 @@ static int gdv_decode_frame(AVCodecContext *avctx, void *data,
     if (pal && pal_size == AVPALETTE_SIZE)
         memcpy(gdv->pal, pal, AVPALETTE_SIZE);
 
+    if (compression < 2 && bytestream2_get_bytes_left(gb) < 256*3)
+        return AVERROR_INVALIDDATA;
     rescale(gdv, gdv->frame, avctx->width, avctx->height,
             !!(flags & 0x10), !!(flags & 0x20));
 
@@ -482,8 +485,6 @@ static int gdv_decode_frame(AVCodecContext *avctx, void *data,
     case 1:
         memset(gdv->frame + PREAMBLE_SIZE, 0, gdv->frame_size - PREAMBLE_SIZE);
     case 0:
-        if (bytestream2_get_bytes_left(gb) < 256*3)
-            return AVERROR_INVALIDDATA;
         for (i = 0; i < 256; i++) {
             unsigned r = bytestream2_get_byte(gb);
             unsigned g = bytestream2_get_byte(gb);

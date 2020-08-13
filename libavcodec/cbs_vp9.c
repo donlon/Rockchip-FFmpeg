@@ -305,7 +305,7 @@ static int cbs_vp9_write_le(CodedBitstreamContext *ctx, PutBitContext *pbc,
 
 #define prob(name, subs, ...) do { \
         uint8_t prob_coded; \
-        int8_t prob; \
+        uint8_t prob; \
         xf(1, name.prob_coded, prob_coded, subs, __VA_ARGS__); \
         if (prob_coded) \
             xf(8, name.prob, prob, subs, __VA_ARGS__); \
@@ -416,6 +416,9 @@ static int cbs_vp9_split_fragment(CodedBitstreamContext *ctx,
     uint8_t superframe_header;
     int err;
 
+    if (frag->data_size == 0)
+        return AVERROR_INVALIDDATA;
+
     // Last byte in the packet.
     superframe_header = frag->data[frag->data_size - 1];
 
@@ -427,6 +430,9 @@ static int cbs_vp9_split_fragment(CodedBitstreamContext *ctx,
 
         index_size = 2 + (((superframe_header & 0x18) >> 3) + 1) *
                           ((superframe_header & 0x07) + 1);
+
+        if (index_size > frag->data_size)
+            return AVERROR_INVALIDDATA;
 
         err = init_get_bits(&gbc, frag->data + frag->data_size - index_size,
                             8 * index_size);
@@ -457,7 +463,7 @@ static int cbs_vp9_split_fragment(CodedBitstreamContext *ctx,
         }
         if (pos + index_size != frag->data_size) {
             av_log(ctx->log_ctx, AV_LOG_WARNING, "Extra padding at "
-                   "end of superframe: %zu bytes.\n",
+                   "end of superframe: %"SIZE_SPECIFIER" bytes.\n",
                    frag->data_size - (pos + index_size));
         }
 
@@ -538,7 +544,7 @@ static int cbs_vp9_write_unit(CodedBitstreamContext *ctx,
         if (err < 0) {
             av_log(ctx->log_ctx, AV_LOG_ERROR, "Unable to allocate a "
                    "sufficiently large write buffer (last attempt "
-                   "%zu bytes).\n", priv->write_buffer_size);
+                   "%"SIZE_SPECIFIER" bytes).\n", priv->write_buffer_size);
             return err;
         }
     }

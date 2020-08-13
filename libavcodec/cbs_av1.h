@@ -256,8 +256,8 @@ typedef struct AV1RawFrameHeader {
     uint8_t  update_grain;
     uint8_t  film_grain_params_ref_idx;
     uint8_t  num_y_points;
-    uint8_t  point_y_value[16];
-    uint8_t  point_y_scaling[16];
+    uint8_t  point_y_value[14];
+    uint8_t  point_y_scaling[14];
     uint8_t  chroma_scaling_from_luma;
     uint8_t  num_cb_points;
     uint8_t  point_cb_value[16];
@@ -268,8 +268,8 @@ typedef struct AV1RawFrameHeader {
     uint8_t  grain_scaling_minus_8;
     uint8_t  ar_coeff_lag;
     uint8_t  ar_coeffs_y_plus_128[24];
-    uint8_t  ar_coeffs_cb_plus_128[24];
-    uint8_t  ar_coeffs_cr_plus_128[24];
+    uint8_t  ar_coeffs_cb_plus_128[25];
+    uint8_t  ar_coeffs_cr_plus_128[25];
     uint8_t  ar_coeff_shift_minus_6;
     uint8_t  grain_scale_shift;
     uint8_t  cb_mult;
@@ -421,7 +421,9 @@ typedef struct CodedBitstreamAV1Context {
     int tile_cols;
     int tile_rows;
 
-    AV1ReferenceFrameState ref[AV1_NUM_REF_FRAMES];
+    AV1ReferenceFrameState *ref;
+    AV1ReferenceFrameState read_ref[AV1_NUM_REF_FRAMES];
+    AV1ReferenceFrameState write_ref[AV1_NUM_REF_FRAMES];
 
     // Write buffer.
     uint8_t *write_buffer;

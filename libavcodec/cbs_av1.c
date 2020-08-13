@@ -125,8 +125,9 @@ static int cbs_av1_write_uvlc(CodedBitstreamContext *ctx, PutBitContext *pbc,
         put_bits(pbc, 1, 1);
     } else {
         zeroes = av_log2(value + 1);
-        v = value - (1 << zeroes) + 1;
-        put_bits(pbc, zeroes + 1, 1);
+        v = value - (1U << zeroes) + 1;
+        put_bits(pbc, zeroes, 0);
+        put_bits(pbc, 1, 1);
         put_bits(pbc, zeroes, v);
     }
 
@@ -169,6 +170,9 @@ static int cbs_av1_read_leb128(CodedBitstreamContext *ctx, GetBitContext *gbc,
         if (!(byte & 0x80))
             break;
     }
+
+    if (value > UINT32_MAX)
+        return AVERROR_INVALIDDATA;
 
     if (ctx->trace_enable)
         ff_cbs_trace_syntax_element(ctx, position, name, NULL, "", value);
@@ -795,7 +799,7 @@ static int cbs_av1_split_fragment(CodedBitstreamContext *ctx,
 
     if (INT_MAX / 8 < size) {
         av_log(ctx->log_ctx, AV_LOG_ERROR, "Invalid fragment: "
-               "too large (%zu bytes).\n", size);
+               "too large (%"SIZE_SPECIFIER" bytes).\n", size);
         err = AVERROR_INVALIDDATA;
         goto fail;
     }
@@ -819,7 +823,7 @@ static int cbs_av1_split_fragment(CodedBitstreamContext *ctx,
 
         if (get_bits_left(&gbc) < 8) {
             av_log(ctx->log_ctx, AV_LOG_ERROR, "Invalid OBU: fragment "
-                   "too short (%zu bytes).\n", size);
+                   "too short (%"SIZE_SPECIFIER" bytes).\n", size);
             err = AVERROR_INVALIDDATA;
             goto fail;
         }
@@ -835,7 +839,7 @@ static int cbs_av1_split_fragment(CodedBitstreamContext *ctx,
 
         if (size < obu_length) {
             av_log(ctx->log_ctx, AV_LOG_ERROR, "Invalid OBU length: "
-                   "%"PRIu64", but only %zu bytes remaining in fragment.\n",
+                   "%"PRIu64", but only %"SIZE_SPECIFIER" bytes remaining in fragment.\n",
                    obu_length, size);
             err = AVERROR_INVALIDDATA;
             goto fail;
@@ -950,7 +954,7 @@ static int cbs_av1_read_unit(CodedBitstreamContext *ctx,
     } else {
         if (unit->data_size < 1 + obu->header.obu_extension_flag) {
             av_log(ctx->log_ctx, AV_LOG_ERROR, "Invalid OBU length: "
-                   "unit too short (%zu).\n", unit->data_size);
+                   "unit too short (%"SIZE_SPECIFIER").\n", unit->data_size);
             return AVERROR_INVALIDDATA;
         }
         obu->obu_size = unit->data_size - 1 - obu->header.obu_extension_flag;
@@ -977,6 +981,8 @@ static int cbs_av1_read_unit(CodedBitstreamContext *ctx,
         priv->temporal_id = 0;
         priv->spatial_id  = 0;
     }
+
+    priv->ref = (AV1ReferenceFrameState *)&priv->read_ref;
 
     switch (obu->header.obu_type) {
     case AV1_OBU_SEQUENCE_HEADER:
@@ -1070,6 +1076,7 @@ static int cbs_av1_read_unit(CodedBitstreamContext *ctx,
 
     if (obu->obu_size > 0 &&
         obu->header.obu_type != AV1_OBU_TILE_GROUP &&
+        obu->header.obu_type != AV1_OBU_TILE_LIST &&
         obu->header.obu_type != AV1_OBU_FRAME) {
         int nb_bits = obu->obu_size * 8 + start_pos - end_pos;
 
@@ -1113,6 +1120,8 @@ static int cbs_av1_write_obu(CodedBitstreamContext *ctx,
 
     td = NULL;
     start_pos = put_bits_count(pbc);
+
+    priv->ref = (AV1ReferenceFrameState *)&priv->write_ref;
 
     switch (obu->header.obu_type) {
     case AV1_OBU_SEQUENCE_HEADER:
@@ -1256,7 +1265,7 @@ static int cbs_av1_write_unit(CodedBitstreamContext *ctx,
         if (err < 0) {
             av_log(ctx->log_ctx, AV_LOG_ERROR, "Unable to allocate a "
                    "sufficiently large write buffer (last attempt "
-                   "%zu bytes).\n", priv->write_buffer_size);
+                   "%"SIZE_SPECIFIER" bytes).\n", priv->write_buffer_size);
             return err;
         }
     }
